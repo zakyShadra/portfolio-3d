@@ -4,13 +4,16 @@ import { createTerrain } from './terrain.js';
 import { scatterWorld } from './scatter.js';
 import { Player } from './player.js';
 import { createSky, createClouds, animateClouds } from './sky.js';
+import { buildLandmarks, animateLandmarks } from './landmarks.js';
+import { buildSignpost } from './signpost.js';
+import { createInfoPanel } from './infoPanel.js';
 
 const canvas = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog('#bcd9e0', 60, 320);
@@ -21,7 +24,15 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 const noise2D = createNoise2D(1337);
 const terrain = createTerrain(noise2D);
 scene.add(terrain);
-scatterWorld(scene, noise2D);
+
+const landmarks = buildLandmarks(scene, noise2D);
+buildSignpost(scene, noise2D, landmarks);
+const infoPanel = createInfoPanel();
+
+scatterWorld(scene, noise2D, {
+  avoidPoints: [{ x: 0, z: 0 }, ...landmarks.map((lm) => ({ x: lm.position.x, z: lm.position.z }))],
+  avoidPointRadius: 10,
+});
 scene.add(createSky());
 const clouds = createClouds();
 scene.add(clouds);
@@ -87,15 +98,26 @@ window.addEventListener('keyup', (e) => {
   if (key) input[key] = false;
 });
 
-// Hide the help overlay after the first real input.
+// Help overlay: auto-hides after the first real input, but can be
+// recalled any time with H or the "?" button — easy to forget the keys.
 const overlay = document.getElementById('overlay');
-function dismissOverlay() {
+const helpBtn = document.getElementById('help-btn');
+
+function hideOverlayOnce() {
   overlay.classList.add('hidden');
-  window.removeEventListener('keydown', dismissOverlay);
-  canvas.removeEventListener('pointerdown', dismissOverlay);
+  window.removeEventListener('keydown', hideOverlayOnce);
+  canvas.removeEventListener('pointerdown', hideOverlayOnce);
 }
-window.addEventListener('keydown', dismissOverlay, { once: true });
-canvas.addEventListener('pointerdown', dismissOverlay, { once: true });
+window.addEventListener('keydown', hideOverlayOnce, { once: true });
+canvas.addEventListener('pointerdown', hideOverlayOnce, { once: true });
+
+function toggleHelp() {
+  overlay.classList.toggle('hidden');
+}
+helpBtn.addEventListener('click', toggleHelp);
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyH' || e.code === 'Slash') toggleHelp();
+});
 
 // --- Resize ---
 window.addEventListener('resize', () => {
@@ -105,13 +127,34 @@ window.addEventListener('resize', () => {
 });
 
 // --- Main loop ---
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 let dayTime = 0.35; // 0..1, fraction of a full day cycle
 
+function updateNearestLandmark() {
+  let nearest = null;
+  let nearestDist = Infinity;
+  for (const lm of landmarks) {
+    const d = player.group.position.distanceTo(lm.position);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = lm;
+    }
+  }
+  if (nearest && nearestDist <= nearest.triggerRadius) {
+    infoPanel.show(nearest.data);
+  } else {
+    infoPanel.hide();
+  }
+}
+
 function render() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  timer.update();
+  const dt = Math.min(timer.getDelta(), 0.05);
+  const elapsed = timer.getElapsed();
 
   player.update(dt, input, cameraState.yaw);
+  animateLandmarks(landmarks, elapsed);
+  updateNearestLandmark();
 
   // Smoothly follow the player with the orbit camera.
   const target = player.group.position.clone().add(new THREE.Vector3(0, 1.4, 0));

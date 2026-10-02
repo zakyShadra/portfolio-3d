@@ -51,7 +51,7 @@ function makeRock() {
   return rock;
 }
 
-export function scatterWorld(scene, noise2D, { count = 260, radius = 220, avoid = 18, seed = 99 } = {}) {
+export function scatterWorld(scene, noise2D, { count = 260, radius = 220, avoid = 18, seed = 99, avoidPoints = [], avoidPointRadius = 9 } = {}) {
   const rand = mulberry32(seed);
   const objects = [];
 
@@ -60,6 +60,11 @@ export function scatterWorld(scene, noise2D, { count = 260, radius = 220, avoid 
     const dist = avoid + rand() * (radius - avoid);
     const x = Math.cos(angle) * dist;
     const z = Math.sin(angle) * dist;
+
+    // Skip spots too close to a landmark/signpost so decor doesn't bury them.
+    const tooClose = avoidPoints.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < avoidPointRadius ** 2);
+    if (tooClose) continue;
+
     const y = heightAt(noise2D, x, z);
 
     // Fewer trees high up on "rocky" peaks, more rocks instead.
