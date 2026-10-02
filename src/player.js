@@ -49,7 +49,7 @@ export class Player {
       this.group.rotation.y = this.facing;
     }
 
-    this.animator.update(dt, this.elapsed, { moving, running });
+    this.animator.update(dt, this.elapsed, { moving, running, moveZ });
 
     const groundY = heightAt(this.noise2D, this.group.position.x, this.group.position.z);
 

@@ -90,31 +90,38 @@ export function buildRobot() {
 
   const root = new THREE.Group();
 
-  // --- Wheels: a pair of road wheels per side, spinning face-on ----------
-  const WHEEL_RADIUS = 0.38;
-  const WHEEL_THICKNESS = 0.22;
+  // --- Wheels: a row of road wheels per side, spinning face-on, wrapped in
+  // a flattened track band so the silhouette reads as a tank track rather
+  // than a handful of exposed car wheels. ---------------------------------
+  const WHEEL_RADIUS = 0.3;
+  const WHEEL_THICKNESS = 0.2;
   const WHEEL_X = 0.56;
-  const WHEEL_Z = 0.3;
+  const WHEEL_COUNT = 4;
+  const TRACK_SPAN = 1.1; // distance between the first and last wheel centers
 
   function makeTreadSide(x) {
-    const front = makeWheel(WHEEL_RADIUS, WHEEL_THICKNESS, treadMat, ribMat);
-    front.mount.position.set(x, WHEEL_RADIUS, WHEEL_Z);
-    root.add(front.mount);
+    const spinners = [];
+    for (let i = 0; i < WHEEL_COUNT; i++) {
+      const z = -TRACK_SPAN / 2 + (TRACK_SPAN * i) / (WHEEL_COUNT - 1);
+      const wheel = makeWheel(WHEEL_RADIUS, WHEEL_THICKNESS, treadMat, ribMat);
+      wheel.mount.position.set(x, WHEEL_RADIUS, z);
+      root.add(wheel.mount);
+      spinners.push(wheel.spinner);
+    }
 
-    const back = makeWheel(WHEEL_RADIUS, WHEEL_THICKNESS, treadMat, ribMat);
-    back.mount.position.set(x, WHEEL_RADIUS, -WHEEL_Z);
-    root.add(back.mount);
-
-    // Static fender bar tying the two wheels together visually.
-    const fender = new THREE.Mesh(
-      new THREE.BoxGeometry(0.1, 0.12, WHEEL_Z * 2 + WHEEL_RADIUS * 0.6),
-      jointMat,
+    // Static track band: a flattened capsule running the length of the
+    // wheel row, encasing the wheels so they read as one continuous track.
+    const band = new THREE.Mesh(
+      new THREE.CapsuleGeometry(WHEEL_RADIUS * 1.12, TRACK_SPAN, 6, 12),
+      treadMat,
     );
-    fender.position.set(x, WHEEL_RADIUS * 2 + 0.02, 0);
-    fender.castShadow = true;
-    root.add(fender);
+    band.rotation.x = Math.PI / 2;
+    band.scale.x = 0.75;
+    band.position.set(x, WHEEL_RADIUS, 0);
+    band.castShadow = true;
+    root.add(band);
 
-    return [front.spinner, back.spinner];
+    return spinners;
   }
 
   const treadL = makeTreadSide(WHEEL_X);
@@ -132,12 +139,15 @@ export function buildRobot() {
   root.add(chestPlate);
 
   // --- Neck + binocular head --------------------------------------------
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.22, 8), jointMat);
-  neck.position.y = TORSO_Y + 0.425 + 0.11;
+  // Short, thicker neck so torso and head read as one connected rig instead
+  // of two blocks floating apart; it still sits flush (not merged) with both.
+  const NECK_HEIGHT = 0.13;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, NECK_HEIGHT, 8), jointMat);
+  neck.position.y = TORSO_Y + 0.425 + NECK_HEIGHT / 2;
   root.add(neck);
 
   const headGroup = new THREE.Group();
-  headGroup.position.y = neck.position.y + 0.11 + 0.14;
+  headGroup.position.y = neck.position.y + NECK_HEIGHT / 2 + 0.14;
   root.add(headGroup);
 
   const headShell = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.3, 0.42), chassisMat);

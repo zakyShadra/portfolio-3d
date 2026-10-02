@@ -5,6 +5,8 @@ const RUN_ROLL = 8.5;
 const WALK_BOB = 0.025;
 const RUN_BOB = 0.05;
 const RUN_LEAN = 0.16;
+const WALK_ARM_SWING = 0.22;
+const RUN_ARM_SWING = 0.4;
 
 const GESTURES = {
   wave: { raiseX: -2.3, hold: 0.9, wiggleZ: 0.35 },
@@ -32,7 +34,7 @@ export class RobotAnimator {
     this.gestureArmZ = { L: 0, R: 0 };
   }
 
-  update(dt, elapsed, { moving, running }) {
+  update(dt, elapsed, { moving, running, moveZ = 0 }) {
     const r = this.robot;
     const ease = 1 - Math.pow(0.001, dt);
     const rollSpeed = moving ? (running ? RUN_ROLL : WALK_ROLL) : 0;
@@ -45,11 +47,14 @@ export class RobotAnimator {
     if (moving) {
       r.torso.position.y = 1.06 + Math.abs(Math.sin(this.rollAngle * 2)) * bobAmount;
       r.torso.rotation.x = THREE.MathUtils.lerp(r.torso.rotation.x, -RUN_LEAN * (running ? 1 : 0.25), ease);
-      // Treads do the moving — arms just carry a bit of counterbalance sway.
+      // Treads do the moving, but arms still swing gently fore-aft with the
+      // stride, reversing when moveZ reverses (walking backward vs forward).
+      const dirSign = moveZ < 0 ? 1 : -1;
+      const swing = Math.sin(this.rollAngle * 0.5) * (running ? RUN_ARM_SWING : WALK_ARM_SWING) * dirSign;
       r.armL.root.rotation.z = Math.sin(this.rollAngle * 0.5) * 0.08;
       r.armR.root.rotation.z = -Math.sin(this.rollAngle * 0.5) * 0.08;
-      r.armL.root.rotation.x = THREE.MathUtils.lerp(r.armL.root.rotation.x, 0, ease);
-      r.armR.root.rotation.x = THREE.MathUtils.lerp(r.armR.root.rotation.x, 0, ease);
+      r.armL.root.rotation.x = THREE.MathUtils.lerp(r.armL.root.rotation.x, swing, ease);
+      r.armR.root.rotation.x = THREE.MathUtils.lerp(r.armR.root.rotation.x, -swing, ease);
 
       // Walking cancels any in-progress gesture rather than freezing mid-air.
       this.gesture.phase = 0;
