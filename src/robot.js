@@ -5,9 +5,10 @@ const COLORS = {
   trim: 0xff5c2e,
   visor: 0x8adfff,
   joint: 0x111214,
+  tread: 0x1c1c1f,
 };
 
-function makeLimb({ upperLen, lowerLen, radius, footSize }, chassisMat, trimMat, jointMat) {
+function makeArm({ upperLen, lowerLen, radius }, chassisMat, trimMat, jointMat) {
   const root = new THREE.Group();
 
   const shoulder = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.15, 10, 10), jointMat);
@@ -31,68 +32,105 @@ function makeLimb({ upperLen, lowerLen, radius, footSize }, chassisMat, trimMat,
   lower.castShadow = true;
   elbow.add(lower);
 
-  const foot = new THREE.Mesh(new THREE.BoxGeometry(footSize, footSize * 0.6, footSize * 1.3), trimMat);
-  foot.position.y = -lowerLen - footSize * 0.3;
-  foot.position.z = footSize * 0.25;
-  foot.castShadow = true;
-  elbow.add(foot);
+  const claw = new THREE.Mesh(new THREE.BoxGeometry(radius * 2.2, radius * 1.1, radius * 1.4), trimMat);
+  claw.position.y = -lowerLen - radius * 0.5;
+  claw.castShadow = true;
+  elbow.add(claw);
 
   return { root, elbow };
 }
 
-// Builds the low-poly explorer rig. Local origin sits exactly at foot level
-// so it drops straight into Player's existing ground-contact logic.
+// Footless, tread-rolling explorer rig (WALL-E-inspired mechanism — tank
+// treads + a binocular eye head — in our own low-poly style, not a literal
+// copy of the copyrighted character design). Local origin sits at tread
+// contact level so it drops straight into Player's ground-contact logic.
 export function buildRobot() {
   const chassisMat = new THREE.MeshStandardMaterial({ color: COLORS.chassis, roughness: 0.55, metalness: 0.35 });
   const trimMat = new THREE.MeshStandardMaterial({ color: COLORS.trim, roughness: 0.4, metalness: 0.2, emissive: COLORS.trim, emissiveIntensity: 0.15 });
   const jointMat = new THREE.MeshStandardMaterial({ color: COLORS.joint, roughness: 0.7, metalness: 0.4 });
   const visorMat = new THREE.MeshStandardMaterial({ color: COLORS.visor, emissive: COLORS.visor, emissiveIntensity: 0.9, roughness: 0.3 });
+  const treadMat = new THREE.MeshStandardMaterial({ color: COLORS.tread, roughness: 0.95, metalness: 0.05 });
 
   const root = new THREE.Group();
 
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.58, 1.05, 6), chassisMat);
-  torso.position.y = 1.59;
+  // --- Treads ---------------------------------------------------------
+  const TREAD_RADIUS = 0.32;
+  const TREAD_LEN = 0.7;
+  const TREAD_X = 0.58;
+
+  const treadGeo = new THREE.CapsuleGeometry(TREAD_RADIUS, TREAD_LEN, 4, 10);
+  const treadL = new THREE.Mesh(treadGeo, treadMat);
+  treadL.rotation.x = Math.PI / 2; // lay the capsule along Z (direction of travel)
+  treadL.position.set(TREAD_X, TREAD_RADIUS, 0);
+  treadL.castShadow = true;
+  treadL.receiveShadow = true;
+  root.add(treadL);
+
+  const treadR = treadL.clone();
+  treadR.position.x = -TREAD_X;
+  root.add(treadR);
+
+  // --- Torso ------------------------------------------------------------
+  const TORSO_Y = 1.06;
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.85, 0.85), chassisMat);
+  torso.position.y = TORSO_Y;
   torso.castShadow = true;
   root.add(torso);
 
-  const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.42, 0.1), trimMat);
-  chestPlate.position.set(0, 1.66, 0.42);
+  const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.4, 0.08), trimMat);
+  chestPlate.position.set(0, TORSO_Y + 0.05, 0.445);
   root.add(chestPlate);
 
+  // --- Neck + binocular head --------------------------------------------
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.22, 8), jointMat);
+  neck.position.y = TORSO_Y + 0.425 + 0.11;
+  root.add(neck);
+
   const headGroup = new THREE.Group();
-  headGroup.position.y = 2.29;
+  headGroup.position.y = neck.position.y + 0.11 + 0.14;
   root.add(headGroup);
 
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.46, 0.5), chassisMat);
-  head.castShadow = true;
-  headGroup.add(head);
+  const headShell = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.3, 0.42), chassisMat);
+  headShell.castShadow = true;
+  headGroup.add(headShell);
 
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.06), visorMat);
-  visor.position.set(0, 0.02, 0.26);
-  headGroup.add(visor);
+  function makeEye() {
+    const eye = new THREE.Group();
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.28, 10), chassisMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = 0.14;
+    barrel.castShadow = true;
+    eye.add(barrel);
 
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6), jointMat);
-  antenna.position.set(0, 0.38, 0);
-  headGroup.add(antenna);
-  const antennaTip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), trimMat);
-  antennaTip.position.set(0, 0.54, 0);
-  headGroup.add(antennaTip);
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), visorMat);
+    lens.scale.z = 0.5;
+    lens.position.z = 0.29;
+    eye.add(lens);
 
-  const armL = makeLimb({ upperLen: 0.46, lowerLen: 0.4, radius: 0.1, footSize: 0.14 }, chassisMat, trimMat, jointMat);
-  armL.root.position.set(0.56, 1.96, 0);
+    eye.userData.lens = lens;
+    return eye;
+  }
+
+  const eyeL = makeEye();
+  eyeL.position.set(0.16, 0.01, 0.18);
+  headGroup.add(eyeL);
+
+  const eyeR = makeEye();
+  eyeR.position.set(-0.16, 0.01, 0.18);
+  headGroup.add(eyeR);
+
+  // --- Arms ---------------------------------------------------------------
+  const armL = makeArm({ upperLen: 0.44, lowerLen: 0.38, radius: 0.1 }, chassisMat, trimMat, jointMat);
+  armL.root.position.set(0.58, TORSO_Y + 0.26, 0);
   root.add(armL.root);
 
-  const armR = makeLimb({ upperLen: 0.46, lowerLen: 0.4, radius: 0.1, footSize: 0.14 }, chassisMat, trimMat, jointMat);
-  armR.root.position.set(-0.56, 1.96, 0);
+  const armR = makeArm({ upperLen: 0.44, lowerLen: 0.38, radius: 0.1 }, chassisMat, trimMat, jointMat);
+  armR.root.position.set(-0.58, TORSO_Y + 0.26, 0);
   root.add(armR.root);
 
-  const legL = makeLimb({ upperLen: 0.5, lowerLen: 0.46, radius: 0.15, footSize: 0.22 }, chassisMat, trimMat, jointMat);
-  legL.root.position.set(0.24, 1.09, 0);
-  root.add(legL.root);
-
-  const legR = makeLimb({ upperLen: 0.5, lowerLen: 0.46, radius: 0.15, footSize: 0.22 }, chassisMat, trimMat, jointMat);
-  legR.root.position.set(-0.24, 1.09, 0);
-  root.add(legR.root);
-
-  return { root, torso, headGroup, visor, visorMat, antennaTip, armL, armR, legL, legR };
+  return {
+    root, torso, treadL, treadR, headGroup,
+    eyeLensL: eyeL.userData.lens, eyeLensR: eyeR.userData.lens,
+    armL, armR,
+  };
 }
