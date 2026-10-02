@@ -6,6 +6,14 @@ const WALK_BOB = 0.025;
 const RUN_BOB = 0.05;
 const RUN_LEAN = 0.16;
 
+const GESTURES = {
+  wave: { raiseX: -2.3, hold: 0.9, wiggleZ: 0.35 },
+  both: { raiseX: -1.9, hold: 0.9, both: true },
+  point: { raiseX: -1.25, hold: 1.1 },
+  shrug: { raiseX: -0.7, hold: 0.8, both: true, pulse: 0.18 },
+};
+const GESTURE_TYPES = Object.keys(GESTURES);
+
 export class RobotAnimator {
   constructor(robot) {
     this.robot = robot;
@@ -19,7 +27,7 @@ export class RobotAnimator {
     this.lookTargetY = 0;
     this.lookPhase = 0; // 0 idle-still, 1 holding a glance
 
-    this.gesture = { phase: 0, t: 0, type: 'wave', side: 'L', nextIn: 3 + Math.random() * 3 };
+    this.gesture = { phase: 0, t: 0, type: 'wave', side: 'L', nextIn: 1 + Math.random() * 1.5 };
     this.gestureArmX = { L: 0, R: 0 };
     this.gestureArmZ = { L: 0, R: 0 };
   }
@@ -31,8 +39,8 @@ export class RobotAnimator {
     const bobAmount = running ? RUN_BOB : WALK_BOB;
 
     this.rollAngle += dt * rollSpeed;
-    r.treadL.rotation.x = Math.PI / 2 + this.rollAngle;
-    r.treadR.rotation.x = Math.PI / 2 + this.rollAngle;
+    r.treadL.forEach((w) => { w.rotation.y = this.rollAngle; });
+    r.treadR.forEach((w) => { w.rotation.y = this.rollAngle; });
 
     if (moving) {
       r.torso.position.y = 1.06 + Math.abs(Math.sin(this.rollAngle * 2)) * bobAmount;
@@ -80,7 +88,7 @@ export class RobotAnimator {
     if (g.phase === 0) {
       g.nextIn -= dt;
       if (g.nextIn <= 0) {
-        g.type = Math.random() < 0.5 ? 'wave' : 'both';
+        g.type = GESTURE_TYPES[Math.floor(Math.random() * GESTURE_TYPES.length)];
         g.side = Math.random() < 0.5 ? 'L' : 'R';
         g.phase = 1;
         g.t = 0;
@@ -89,29 +97,35 @@ export class RobotAnimator {
     }
 
     g.t += dt;
-    const sides = g.type === 'both' ? ['L', 'R'] : [g.side];
-    const raiseX = g.type === 'both' ? -1.9 : -2.3;
+    const cfg = GESTURES[g.type];
+    const sides = cfg.both ? ['L', 'R'] : [g.side];
 
     if (g.phase === 1) { // raise
-      const p = Math.min(1, g.t / 0.4);
+      const p = Math.min(1, g.t / 0.35);
       const e = 1 - (1 - p) * (1 - p);
-      sides.forEach((s) => { this.gestureArmX[s] = THREE.MathUtils.lerp(0, raiseX, e); });
+      sides.forEach((s) => { this.gestureArmX[s] = THREE.MathUtils.lerp(0, cfg.raiseX, e); });
       if (p >= 1) { g.phase = 2; g.t = 0; }
-    } else if (g.phase === 2) { // hold / wave
+    } else if (g.phase === 2) { // hold / wave / pulse
       sides.forEach((s) => {
-        this.gestureArmX[s] = raiseX;
-        this.gestureArmZ[s] = g.type === 'wave' ? Math.sin(g.t * 11) * 0.35 * (s === 'L' ? 1 : -1) : 0;
+        if (cfg.wiggleZ) {
+          this.gestureArmX[s] = cfg.raiseX;
+          this.gestureArmZ[s] = Math.sin(g.t * 11) * cfg.wiggleZ * (s === 'L' ? 1 : -1);
+        } else if (cfg.pulse) {
+          this.gestureArmX[s] = cfg.raiseX + Math.sin(g.t * 16) * cfg.pulse;
+        } else {
+          this.gestureArmX[s] = cfg.raiseX;
+        }
       });
-      if (g.t >= 0.9) { g.phase = 3; g.t = 0; }
+      if (g.t >= cfg.hold) { g.phase = 3; g.t = 0; }
     } else if (g.phase === 3) { // lower
-      const p = Math.min(1, g.t / 0.4);
+      const p = Math.min(1, g.t / 0.35);
       sides.forEach((s) => {
-        this.gestureArmX[s] = THREE.MathUtils.lerp(raiseX, 0, p);
+        this.gestureArmX[s] = THREE.MathUtils.lerp(cfg.raiseX, 0, p);
         this.gestureArmZ[s] = THREE.MathUtils.lerp(this.gestureArmZ[s], 0, p);
       });
       if (p >= 1) {
         g.phase = 0;
-        g.nextIn = 4 + Math.random() * 5;
+        g.nextIn = 1.5 + Math.random() * 2;
         sides.forEach((s) => { this.gestureArmX[s] = 0; this.gestureArmZ[s] = 0; });
       }
     }

@@ -9,43 +9,39 @@ const COLORS = {
   rib: 0x9a9da4,
 };
 
-// A steel roller drum with ribs running its length, mounted on static axle
-// caps. Only the inner "rotor" spins — around the drum's own axle, not its
-// long axis — so it reads as a rolling tank wheel, not a motionless capsule.
-function makeTreadUnit(radius, length, treadMat, ribMat, jointMat) {
-  const mount = new THREE.Group(); // static: positions the whole wheel on the robot
+// A road wheel: a flat disc on a horizontal axle running left-right (world
+// X), spinning face-on around that axle — the classic tank-wheel silhouette,
+// not a long tube tumbling end over end. Bolt heads near the rim make the
+// spin readable (a plain disc spinning on its own symmetric axis shows no
+// visible motion without an off-center mark).
+function makeWheel(radius, thickness, steelMat, boltMat) {
+  const mount = new THREE.Group(); // static: positions this wheel on the robot
 
-  const rotor = new THREE.Group(); // spins every frame: rotation.x = PI/2 (layout) + rollAngle
-  rotor.rotation.x = Math.PI / 2;
-  mount.add(rotor);
+  const orient = new THREE.Group(); // static one-time turn: local Y axle -> world X
+  orient.rotation.z = Math.PI / 2;
+  mount.add(orient);
 
-  const drum = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 4, 12), treadMat);
-  drum.castShadow = true;
-  drum.receiveShadow = true;
-  rotor.add(drum);
+  const spinner = new THREE.Group(); // spins every frame: rotation.y = rollAngle
+  orient.add(spinner);
 
-  const RIB_COUNT = 6;
-  for (let i = 0; i < RIB_COUNT; i++) {
-    const phi = (i / RIB_COUNT) * Math.PI * 2;
-    const rib = new THREE.Mesh(new THREE.BoxGeometry(0.05, length + radius * 0.3, radius * 0.22), ribMat);
-    rib.position.set(Math.cos(phi) * radius * 0.96, 0, Math.sin(phi) * radius * 0.96);
-    rib.rotation.y = -phi;
-    rib.castShadow = true;
-    rotor.add(rib);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, thickness, 16), steelMat);
+  disc.castShadow = true;
+  disc.receiveShadow = true;
+  spinner.add(disc);
+
+  const BOLT_COUNT = 5;
+  for (let i = 0; i < BOLT_COUNT; i++) {
+    const phi = (i / BOLT_COUNT) * Math.PI * 2;
+    const bx = Math.cos(phi) * radius * 0.62;
+    const bz = Math.sin(phi) * radius * 0.62;
+    [thickness / 2, -thickness / 2].forEach((by) => {
+      const bolt = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.11, 6, 6), boltMat);
+      bolt.position.set(bx, by, bz);
+      spinner.add(bolt);
+    });
   }
 
-  // Static axle caps, built directly in mount's (unrotated) frame where Z
-  // is already the wheel's length axis — these never spin.
-  const capGeo = new THREE.CylinderGeometry(radius * 0.22, radius * 0.22, 0.06, 10);
-  const capFront = new THREE.Mesh(capGeo, jointMat);
-  capFront.rotation.x = Math.PI / 2;
-  capFront.position.z = length / 2 + radius * 0.5;
-  mount.add(capFront);
-  const capBack = capFront.clone();
-  capBack.position.z = -(length / 2 + radius * 0.5);
-  mount.add(capBack);
-
-  return { mount, rotor };
+  return { mount, spinner };
 }
 
 function makeArm({ upperLen, lowerLen, radius }, chassisMat, trimMat, jointMat) {
@@ -94,21 +90,38 @@ export function buildRobot() {
 
   const root = new THREE.Group();
 
-  // --- Treads: steel roller wheels with spinning ribs -------------------
-  const TREAD_RADIUS = 0.32;
-  const TREAD_LEN = 0.7;
-  const TREAD_X = 0.58;
+  // --- Wheels: a pair of road wheels per side, spinning face-on ----------
+  const WHEEL_RADIUS = 0.38;
+  const WHEEL_THICKNESS = 0.22;
+  const WHEEL_X = 0.56;
+  const WHEEL_Z = 0.3;
 
-  const treadUnitL = makeTreadUnit(TREAD_RADIUS, TREAD_LEN, treadMat, ribMat, jointMat);
-  treadUnitL.mount.position.set(TREAD_X, TREAD_RADIUS, 0);
-  root.add(treadUnitL.mount);
+  function makeTreadSide(x) {
+    const front = makeWheel(WHEEL_RADIUS, WHEEL_THICKNESS, treadMat, ribMat);
+    front.mount.position.set(x, WHEEL_RADIUS, WHEEL_Z);
+    root.add(front.mount);
 
-  const treadUnitR = makeTreadUnit(TREAD_RADIUS, TREAD_LEN, treadMat, ribMat, jointMat);
-  treadUnitR.mount.position.set(-TREAD_X, TREAD_RADIUS, 0);
-  root.add(treadUnitR.mount);
+    const back = makeWheel(WHEEL_RADIUS, WHEEL_THICKNESS, treadMat, ribMat);
+    back.mount.position.set(x, WHEEL_RADIUS, -WHEEL_Z);
+    root.add(back.mount);
+
+    // Static fender bar tying the two wheels together visually.
+    const fender = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.12, WHEEL_Z * 2 + WHEEL_RADIUS * 0.6),
+      jointMat,
+    );
+    fender.position.set(x, WHEEL_RADIUS * 2 + 0.02, 0);
+    fender.castShadow = true;
+    root.add(fender);
+
+    return [front.spinner, back.spinner];
+  }
+
+  const treadL = makeTreadSide(WHEEL_X);
+  const treadR = makeTreadSide(-WHEEL_X);
 
   // --- Torso ------------------------------------------------------------
-  const TORSO_Y = 1.06;
+  const TORSO_Y = WHEEL_RADIUS * 2 + 0.425;
   const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.85, 0.85), chassisMat);
   torso.position.y = TORSO_Y;
   torso.castShadow = true;
@@ -166,8 +179,7 @@ export function buildRobot() {
   root.add(armR.root);
 
   return {
-    root, torso, headGroup,
-    treadL: treadUnitL.rotor, treadR: treadUnitR.rotor,
+    root, torso, headGroup, treadL, treadR,
     eyeLensL: eyeL.userData.lens, eyeLensR: eyeR.userData.lens,
     armL, armR,
   };
