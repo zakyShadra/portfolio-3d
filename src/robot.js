@@ -5,8 +5,8 @@ const COLORS = {
   trim: 0xff5c2e,
   visor: 0x8adfff,
   joint: 0x111214,
-  tread: 0x3a3d42,
-  rib: 0x9a9da4,
+  tread: 0x6b4a2f,
+  rib: 0xb8bcc2,
 };
 
 // A road wheel: a flat disc on a horizontal axle running left-right (world
@@ -85,14 +85,15 @@ export function buildRobot() {
   const trimMat = new THREE.MeshStandardMaterial({ color: COLORS.trim, roughness: 0.4, metalness: 0.2, emissive: COLORS.trim, emissiveIntensity: 0.15 });
   const jointMat = new THREE.MeshStandardMaterial({ color: COLORS.joint, roughness: 0.7, metalness: 0.4 });
   const visorMat = new THREE.MeshStandardMaterial({ color: COLORS.visor, emissive: COLORS.visor, emissiveIntensity: 0.9, roughness: 0.3 });
-  const treadMat = new THREE.MeshStandardMaterial({ color: COLORS.tread, roughness: 0.4, metalness: 0.6 });
+  const treadMat = new THREE.MeshStandardMaterial({ color: COLORS.tread, roughness: 0.85, metalness: 0.1 });
   const ribMat = new THREE.MeshStandardMaterial({ color: COLORS.rib, roughness: 0.3, metalness: 0.7 });
 
   const root = new THREE.Group();
 
-  // --- Wheels: a row of road wheels per side, spinning face-on, wrapped in
-  // a flattened track band so the silhouette reads as a tank track rather
-  // than a handful of exposed car wheels. ---------------------------------
+  // --- Wheels: a row of silver road wheels per side, spinning face-on, set
+  // in a thin brown track band — wheels stay the visible circles (like a
+  // real tank's road wheels), the band is just the connecting housing
+  // behind them, not a shell that swallows them. -------------------------
   const WHEEL_RADIUS = 0.3;
   const WHEEL_THICKNESS = 0.2;
   const WHEEL_X = 0.56;
@@ -103,20 +104,21 @@ export function buildRobot() {
     const spinners = [];
     for (let i = 0; i < WHEEL_COUNT; i++) {
       const z = -TRACK_SPAN / 2 + (TRACK_SPAN * i) / (WHEEL_COUNT - 1);
-      const wheel = makeWheel(WHEEL_RADIUS, WHEEL_THICKNESS, treadMat, ribMat);
+      const wheel = makeWheel(WHEEL_RADIUS, WHEEL_THICKNESS, ribMat, jointMat);
       wheel.mount.position.set(x, WHEEL_RADIUS, z);
       root.add(wheel.mount);
       spinners.push(wheel.spinner);
     }
 
-    // Static track band: a flattened capsule running the length of the
-    // wheel row, encasing the wheels so they read as one continuous track.
+    // Static track band: a thin brown strip running the length of the wheel
+    // row, narrower than the wheels so each silver disc pokes through on
+    // both faces — just a rim and a connecting strip between the wheels.
     const band = new THREE.Mesh(
-      new THREE.CapsuleGeometry(WHEEL_RADIUS * 1.12, TRACK_SPAN, 6, 12),
+      new THREE.CapsuleGeometry(WHEEL_RADIUS * 1.08, TRACK_SPAN, 6, 12),
       treadMat,
     );
     band.rotation.x = Math.PI / 2;
-    band.scale.x = 0.75;
+    band.scale.x = 0.19;
     band.position.set(x, WHEEL_RADIUS, 0);
     band.castShadow = true;
     root.add(band);
