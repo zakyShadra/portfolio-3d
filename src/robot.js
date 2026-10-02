@@ -5,8 +5,48 @@ const COLORS = {
   trim: 0xff5c2e,
   visor: 0x8adfff,
   joint: 0x111214,
-  tread: 0x1c1c1f,
+  tread: 0x3a3d42,
+  rib: 0x9a9da4,
 };
+
+// A steel roller drum with ribs running its length, mounted on static axle
+// caps. Only the inner "rotor" spins — around the drum's own axle, not its
+// long axis — so it reads as a rolling tank wheel, not a motionless capsule.
+function makeTreadUnit(radius, length, treadMat, ribMat, jointMat) {
+  const mount = new THREE.Group(); // static: positions the whole wheel on the robot
+
+  const rotor = new THREE.Group(); // spins every frame: rotation.x = PI/2 (layout) + rollAngle
+  rotor.rotation.x = Math.PI / 2;
+  mount.add(rotor);
+
+  const drum = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 4, 12), treadMat);
+  drum.castShadow = true;
+  drum.receiveShadow = true;
+  rotor.add(drum);
+
+  const RIB_COUNT = 6;
+  for (let i = 0; i < RIB_COUNT; i++) {
+    const phi = (i / RIB_COUNT) * Math.PI * 2;
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(0.05, length + radius * 0.3, radius * 0.22), ribMat);
+    rib.position.set(Math.cos(phi) * radius * 0.96, 0, Math.sin(phi) * radius * 0.96);
+    rib.rotation.y = -phi;
+    rib.castShadow = true;
+    rotor.add(rib);
+  }
+
+  // Static axle caps, built directly in mount's (unrotated) frame where Z
+  // is already the wheel's length axis — these never spin.
+  const capGeo = new THREE.CylinderGeometry(radius * 0.22, radius * 0.22, 0.06, 10);
+  const capFront = new THREE.Mesh(capGeo, jointMat);
+  capFront.rotation.x = Math.PI / 2;
+  capFront.position.z = length / 2 + radius * 0.5;
+  mount.add(capFront);
+  const capBack = capFront.clone();
+  capBack.position.z = -(length / 2 + radius * 0.5);
+  mount.add(capBack);
+
+  return { mount, rotor };
+}
 
 function makeArm({ upperLen, lowerLen, radius }, chassisMat, trimMat, jointMat) {
   const root = new THREE.Group();
@@ -49,26 +89,23 @@ export function buildRobot() {
   const trimMat = new THREE.MeshStandardMaterial({ color: COLORS.trim, roughness: 0.4, metalness: 0.2, emissive: COLORS.trim, emissiveIntensity: 0.15 });
   const jointMat = new THREE.MeshStandardMaterial({ color: COLORS.joint, roughness: 0.7, metalness: 0.4 });
   const visorMat = new THREE.MeshStandardMaterial({ color: COLORS.visor, emissive: COLORS.visor, emissiveIntensity: 0.9, roughness: 0.3 });
-  const treadMat = new THREE.MeshStandardMaterial({ color: COLORS.tread, roughness: 0.95, metalness: 0.05 });
+  const treadMat = new THREE.MeshStandardMaterial({ color: COLORS.tread, roughness: 0.4, metalness: 0.6 });
+  const ribMat = new THREE.MeshStandardMaterial({ color: COLORS.rib, roughness: 0.3, metalness: 0.7 });
 
   const root = new THREE.Group();
 
-  // --- Treads ---------------------------------------------------------
+  // --- Treads: steel roller wheels with spinning ribs -------------------
   const TREAD_RADIUS = 0.32;
   const TREAD_LEN = 0.7;
   const TREAD_X = 0.58;
 
-  const treadGeo = new THREE.CapsuleGeometry(TREAD_RADIUS, TREAD_LEN, 4, 10);
-  const treadL = new THREE.Mesh(treadGeo, treadMat);
-  treadL.rotation.x = Math.PI / 2; // lay the capsule along Z (direction of travel)
-  treadL.position.set(TREAD_X, TREAD_RADIUS, 0);
-  treadL.castShadow = true;
-  treadL.receiveShadow = true;
-  root.add(treadL);
+  const treadUnitL = makeTreadUnit(TREAD_RADIUS, TREAD_LEN, treadMat, ribMat, jointMat);
+  treadUnitL.mount.position.set(TREAD_X, TREAD_RADIUS, 0);
+  root.add(treadUnitL.mount);
 
-  const treadR = treadL.clone();
-  treadR.position.x = -TREAD_X;
-  root.add(treadR);
+  const treadUnitR = makeTreadUnit(TREAD_RADIUS, TREAD_LEN, treadMat, ribMat, jointMat);
+  treadUnitR.mount.position.set(-TREAD_X, TREAD_RADIUS, 0);
+  root.add(treadUnitR.mount);
 
   // --- Torso ------------------------------------------------------------
   const TORSO_Y = 1.06;
@@ -129,7 +166,8 @@ export function buildRobot() {
   root.add(armR.root);
 
   return {
-    root, torso, treadL, treadR, headGroup,
+    root, torso, headGroup,
+    treadL: treadUnitL.rotor, treadR: treadUnitR.rotor,
     eyeLensL: eyeL.userData.lens, eyeLensR: eyeR.userData.lens,
     armL, armR,
   };
