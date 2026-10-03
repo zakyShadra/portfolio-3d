@@ -9,10 +9,12 @@ const SNEAK_SPEED = 4;
 const TURN_RATE = 2.6; // rad/s pivot turn at walk pace; scales with speed below
 const JUMP_SPEED = 9;
 const GRAVITY = -24;
+const PLAYER_RADIUS = 0.6; // rough horizontal footprint, for pushing out of solid scatter objects
 
 export class Player {
-  constructor(terrainMesh, spawn = new THREE.Vector3(0, 0, 0)) {
+  constructor(terrainMesh, spawn = new THREE.Vector3(0, 0, 0), colliders = []) {
     this.terrainMesh = terrainMesh;
+    this.colliders = colliders;
 
     // group = ground position + facing (physics). robot.root hangs off it so
     // gait bob/lean never fights the ground-contact math below.
@@ -45,6 +47,35 @@ export class Player {
     const right = new THREE.Vector3().crossVectors(this.up, this.forward).normalize();
     const basis = new THREE.Matrix4().makeBasis(right, this.up, this.forward);
     this.group.quaternion.setFromRotationMatrix(basis);
+  }
+
+  // Pushes the player back out of any rock they just walked into. Position
+  // on this sphere is entirely determined by `up` + `radialDistance`, so
+  // "pushing sideways" means rotating `up` (and `forward` with it, to keep
+  // the frame consistent) around the axis perpendicular to both the current
+  // up and the push direction — the same trick walking itself uses, just
+  // aimed away from the obstacle instead of along `forward`.
+  _resolveCollisions() {
+    if (!this.colliders.length) return;
+    const pos = PLANET_CENTER.clone().addScaledVector(this.up, this.radialDistance);
+
+    for (const rock of this.colliders) {
+      const toPlayer = pos.clone().sub(rock.position);
+      const dist = toPlayer.length();
+      const minDist = PLAYER_RADIUS + rock.radius;
+      if (dist >= minDist || dist < 1e-6) continue;
+
+      const tangentPush = toPlayer.addScaledVector(this.up, -toPlayer.dot(this.up));
+      if (tangentPush.lengthSq() < 1e-8) continue;
+      tangentPush.normalize();
+
+      const overlap = minDist - dist;
+      const pushAxis = new THREE.Vector3().crossVectors(this.up, tangentPush).normalize();
+      const pushQ = new THREE.Quaternion().setFromAxisAngle(pushAxis, overlap / PLANET_RADIUS);
+      this.up.applyQuaternion(pushQ).normalize();
+      this.forward.applyQuaternion(pushQ).normalize();
+      pos.copy(PLANET_CENTER).addScaledVector(this.up, this.radialDistance);
+    }
   }
 
   update(dt, input) {
@@ -82,6 +113,8 @@ export class Player {
 
     // Guard against floating-point drift so up/forward stay exactly perpendicular.
     this.forward.addScaledVector(this.up, -this.forward.dot(this.up)).normalize();
+
+    this._resolveCollisions();
 
     const groundRadius = groundRadiusAt(this.terrainMesh, this.up);
 

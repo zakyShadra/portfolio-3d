@@ -12,7 +12,8 @@ function mulberry32(seed) {
 }
 
 function makeRock() {
-  const geometry = new THREE.IcosahedronGeometry(0.6 + Math.random() * 0.8, 0);
+  const baseRadius = 0.6 + Math.random() * 0.8;
+  const geometry = new THREE.IcosahedronGeometry(baseRadius, 0);
   const grey = 0.45 + Math.random() * 0.25;
   const material = new THREE.MeshStandardMaterial({
     color: new THREE.Color(grey, grey, grey * 0.96),
@@ -23,6 +24,7 @@ function makeRock() {
   rock.scale.y *= 0.6 + Math.random() * 0.3;
   rock.castShadow = true;
   rock.receiveShadow = true;
+  rock.userData.baseRadius = baseRadius;
   return rock;
 }
 
@@ -53,7 +55,9 @@ export function scatterWorld(scene, terrainMesh, { count = 260, radius = 220, av
     item.scale.multiplyScalar(scale);
 
     scene.add(item);
-    objects.push(item);
+    // Horizontal (xz) collision radius only — squish/scale only affects height,
+    // and that's all the player's tangent-plane collision check needs.
+    objects.push({ mesh: item, position: position.clone(), radius: item.userData.baseRadius * scale });
   }
 
   return objects;

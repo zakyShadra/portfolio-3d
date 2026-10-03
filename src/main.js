@@ -29,7 +29,7 @@ const landmarks = buildLandmarks(scene, terrain);
 const ship = buildSpaceship(scene, terrain, landmarks);
 const infoPanel = createInfoPanel();
 
-scatterWorld(scene, terrain, {
+const rocks = scatterWorld(scene, terrain, {
   avoidPoints: [{ x: 0, z: 0 }, ...landmarks.map((lm) => ({ x: lm.position.x, z: lm.position.z }))],
   avoidPointRadius: 10,
 });
@@ -51,7 +51,7 @@ scene.add(sun);
 scene.add(sun.target);
 
 // --- Player ---
-const player = new Player(terrain, new THREE.Vector3(0, 0, 0));
+const player = new Player(terrain, new THREE.Vector3(0, 0, 0), rocks);
 scene.add(player.group);
 
 // --- Camera rig: drag-to-look third person orbit ---
