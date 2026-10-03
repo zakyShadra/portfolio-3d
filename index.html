@@ -85,6 +85,65 @@
     #info-panel .links a { color: #8adfff; text-decoration: none; font-size: 13px; margin-right: 14px; }
     #info-panel .links a:hover { text-decoration: underline; }
     #info-panel ul { margin: 0; padding-left: 18px; font-size: 13px; color: #d8d6cb; }
+
+    /* Touch controls: hidden by default, shown only on coarse-pointer
+       (touchscreen) devices — see the pointer:coarse check in main.js. */
+    #touch-controls { display: none; }
+    body.touch-mode #touch-controls { display: block; }
+    body.touch-mode .desktop-only { display: none; }
+    body:not(.touch-mode) .touch-only { display: none; }
+
+    #joystick-base {
+      position: fixed;
+      left: 28px;
+      bottom: 28px;
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: rgba(10, 14, 10, 0.45);
+      border: 1px solid rgba(255,255,255,0.25);
+      backdrop-filter: blur(4px);
+      touch-action: none;
+    }
+    #joystick-knob {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 52px;
+      height: 52px;
+      margin: -26px 0 0 -26px;
+      border-radius: 50%;
+      background: rgba(255, 210, 122, 0.55);
+      border: 1px solid rgba(255,255,255,0.4);
+      transition: transform 0.05s linear;
+    }
+
+    #action-buttons {
+      position: fixed;
+      right: 24px;
+      bottom: 28px;
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+    }
+    .action-btn {
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.3);
+      background: rgba(10, 14, 10, 0.55);
+      backdrop-filter: blur(4px);
+      color: #f4f4f0;
+      font: 600 12px system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .action-btn:active, .action-btn.active { background: rgba(255, 210, 122, 0.5); }
+    #jump-btn { width: 72px; height: 72px; font-size: 13px; }
+    #run-btn { width: 58px; height: 58px; }
   </style>
 </head>
 <body>
@@ -94,10 +153,25 @@
 
   <div id="overlay">
     <div class="card">
-      <b>W/S</b> — maju/mundur &nbsp;•&nbsp; <b>A/D</b> — putar track kiri/kanan &nbsp;•&nbsp; <b>Shift</b> — lari &nbsp;•&nbsp; <b>Ctrl</b> — mengendap &nbsp;•&nbsp; <b>Space</b> — lompat<br/>
-      <b>Drag mouse</b> — putar kamera &nbsp;•&nbsp; <b>Scroll</b> — zoom<br/>
+      <span class="desktop-only">
+        <b>W/S</b> — maju/mundur &nbsp;•&nbsp; <b>A/D</b> — putar track kiri/kanan &nbsp;•&nbsp; <b>Shift</b> — lari &nbsp;•&nbsp; <b>Ctrl</b> — mengendap &nbsp;•&nbsp; <b>Space</b> — lompat<br/>
+        <b>Drag mouse</b> — putar kamera &nbsp;•&nbsp; <b>Scroll</b> — zoom<br/>
+      </span>
+      <span class="touch-only">
+        <b>Joystick kiri</b> — gerak &nbsp;•&nbsp; <b>Tombol kanan</b> — lompat / lari<br/>
+        <b>Geser layar</b> — putar kamera &nbsp;•&nbsp; <b>Cubit</b> — zoom<br/>
+      </span>
       Ikuti pancaran cahaya dari kapal, dekati kristal penanda untuk membaca isinya<br/>
-      <span style="opacity:0.7; font-size:13px;">Lupa kontrolnya? Pencet <b>H</b> atau tombol <b>?</b> pojok kanan atas kapan aja.</span>
+      <span style="opacity:0.7; font-size:13px;" class="desktop-only">Lupa kontrolnya? Pencet <b>H</b> atau tombol <b>?</b> pojok kanan atas kapan aja.</span>
+      <span style="opacity:0.7; font-size:13px;" class="touch-only">Lupa kontrolnya? Ketuk tombol <b>?</b> pojok kanan atas kapan aja.</span>
+    </div>
+  </div>
+
+  <div id="touch-controls">
+    <div id="joystick-base"><div id="joystick-knob"></div></div>
+    <div id="action-buttons">
+      <button id="run-btn" class="action-btn" title="Lari">LARI</button>
+      <button id="jump-btn" class="action-btn" title="Lompat">LOMPAT</button>
     </div>
   </div>
 

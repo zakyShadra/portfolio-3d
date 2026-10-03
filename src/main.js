@@ -54,17 +54,41 @@ scene.add(sun.target);
 const player = new Player(terrain, new THREE.Vector3(0, 0, 0), rocks);
 scene.add(player.group);
 
-// --- Camera rig: drag-to-look third person orbit ---
+// --- Camera rig: drag-to-look third person orbit, pinch-to-zoom on touch ---
 const cameraState = { yaw: Math.PI, pitch: 0.45, distance: 9 };
 let dragging = false;
 let lastPointer = { x: 0, y: 0 };
 
+// Tracks every pointer currently down on the canvas (by id) so two-finger
+// touch can pinch-zoom instead of fighting the single-finger orbit drag.
+const activeCanvasPointers = new Map();
+let pinchStartDist = null;
+let pinchStartDistance = null;
+
 canvas.addEventListener('pointerdown', (e) => {
-  dragging = true;
-  lastPointer = { x: e.clientX, y: e.clientY };
+  activeCanvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (activeCanvasPointers.size === 1) {
+    dragging = true;
+    lastPointer = { x: e.clientX, y: e.clientY };
+  } else if (activeCanvasPointers.size === 2) {
+    dragging = false;
+    const [a, b] = activeCanvasPointers.values();
+    pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
+    pinchStartDistance = cameraState.distance;
+  }
 });
-window.addEventListener('pointerup', () => (dragging = false));
 window.addEventListener('pointermove', (e) => {
+  if (!activeCanvasPointers.has(e.pointerId)) return;
+  activeCanvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (activeCanvasPointers.size >= 2) {
+    const [a, b] = activeCanvasPointers.values();
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchStartDist) {
+      cameraState.distance = THREE.MathUtils.clamp(pinchStartDistance * (pinchStartDist / dist), 4, 20);
+    }
+    return;
+  }
   if (!dragging) return;
   const dx = e.clientX - lastPointer.x;
   const dy = e.clientY - lastPointer.y;
@@ -72,6 +96,22 @@ window.addEventListener('pointermove', (e) => {
   cameraState.yaw -= dx * 0.005;
   cameraState.pitch = THREE.MathUtils.clamp(cameraState.pitch - dy * 0.005, 0.1, 1.2);
 });
+function releaseCanvasPointer(e) {
+  activeCanvasPointers.delete(e.pointerId);
+  if (activeCanvasPointers.size === 0) {
+    dragging = false;
+    pinchStartDist = null;
+  } else if (activeCanvasPointers.size === 1) {
+    // Dropped from two fingers to one: resume single-finger orbit from
+    // wherever that remaining finger already is, so it doesn't jump.
+    const [p] = activeCanvasPointers.values();
+    dragging = true;
+    lastPointer = { x: p.x, y: p.y };
+    pinchStartDist = null;
+  }
+}
+window.addEventListener('pointerup', releaseCanvasPointer);
+window.addEventListener('pointercancel', releaseCanvasPointer);
 canvas.addEventListener('wheel', (e) => {
   cameraState.distance = THREE.MathUtils.clamp(cameraState.distance + e.deltaY * 0.01, 4, 20);
 });
@@ -101,6 +141,83 @@ window.addEventListener('keyup', (e) => {
   if (key) input[key] = false;
 });
 
+// --- Touch controls: virtual joystick (move) + hold buttons (run/jump) ---
+// Shown only on coarse-pointer (touchscreen) devices, so desktop keeps the
+// plain keyboard/mouse experience. Re-checked on change so plugging in a
+// mouse (or a devtools toggle) swaps the overlay copy live.
+const touchModeQuery = window.matchMedia('(pointer: coarse)');
+function updateTouchMode() {
+  document.body.classList.toggle('touch-mode', touchModeQuery.matches);
+}
+updateTouchMode();
+touchModeQuery.addEventListener('change', updateTouchMode);
+
+const touchControls = document.getElementById('touch-controls');
+const joystickBase = document.getElementById('joystick-base');
+const joystickKnob = document.getElementById('joystick-knob');
+const JOY_RADIUS = 60;
+const JOY_DEADZONE = 0.35;
+let joystickPointerId = null;
+
+function setJoystickFromCenter(dx, dy) {
+  const dist = Math.hypot(dx, dy) || 1;
+  const clamped = Math.min(dist, JOY_RADIUS);
+  const kx = (dx / dist) * clamped;
+  const ky = (dy / dist) * clamped;
+  joystickKnob.style.transform = `translate(${kx}px, ${ky}px)`;
+
+  const nx = kx / JOY_RADIUS;
+  const ny = ky / JOY_RADIUS;
+  input.forward = ny < -JOY_DEADZONE;
+  input.back = ny > JOY_DEADZONE;
+  input.left = nx < -JOY_DEADZONE;
+  input.right = nx > JOY_DEADZONE;
+}
+function resetJoystick() {
+  joystickKnob.style.transform = 'translate(0px, 0px)';
+  input.forward = false;
+  input.back = false;
+  input.left = false;
+  input.right = false;
+}
+joystickBase.addEventListener('pointerdown', (e) => {
+  joystickPointerId = e.pointerId;
+  try { joystickBase.setPointerCapture(e.pointerId); } catch { /* ignore: capture is a nicety, not required */ }
+  const rect = joystickBase.getBoundingClientRect();
+  setJoystickFromCenter(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
+});
+joystickBase.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== joystickPointerId) return;
+  const rect = joystickBase.getBoundingClientRect();
+  setJoystickFromCenter(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
+});
+function releaseJoystick(e) {
+  if (e.pointerId !== joystickPointerId) return;
+  joystickPointerId = null;
+  resetJoystick();
+}
+joystickBase.addEventListener('pointerup', releaseJoystick);
+joystickBase.addEventListener('pointercancel', releaseJoystick);
+
+// Hold-to-run / hold-to-jump buttons, mirroring the keyboard's hold semantics.
+// Pointer capture keeps the press "latched" to the button even if the finger
+// drifts a few pixels, which touch input does constantly.
+function bindHoldButton(el, key) {
+  el.addEventListener('pointerdown', (e) => {
+    try { el.setPointerCapture(e.pointerId); } catch { /* ignore: capture is a nicety, not required */ }
+    input[key] = true;
+    el.classList.add('active');
+  });
+  const release = () => {
+    input[key] = false;
+    el.classList.remove('active');
+  };
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+}
+bindHoldButton(document.getElementById('run-btn'), 'run');
+bindHoldButton(document.getElementById('jump-btn'), 'jump');
+
 // Help overlay: auto-hides after the first real input, but can be
 // recalled any time with H or the "?" button — easy to forget the keys.
 const overlay = document.getElementById('overlay');
@@ -110,9 +227,11 @@ function hideOverlayOnce() {
   overlay.classList.add('hidden');
   window.removeEventListener('keydown', hideOverlayOnce);
   canvas.removeEventListener('pointerdown', hideOverlayOnce);
+  touchControls.removeEventListener('pointerdown', hideOverlayOnce);
 }
 window.addEventListener('keydown', hideOverlayOnce, { once: true });
 canvas.addEventListener('pointerdown', hideOverlayOnce, { once: true });
+touchControls.addEventListener('pointerdown', hideOverlayOnce, { once: true });
 
 function toggleHelp() {
   overlay.classList.toggle('hidden');
