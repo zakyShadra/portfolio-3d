@@ -1,17 +1,18 @@
 import * as THREE from 'three';
-import { heightAt } from './terrain.js';
+import { PLANET_RADIUS, PLANET_CENTER, groundRadiusAt, placeOnSphere } from './terrain.js';
 import { buildRobot } from './robot.js';
 import { RobotAnimator } from './robotAnimator.js';
 
 const WALK_SPEED = 9;
 const RUN_SPEED = 16;
+const SNEAK_SPEED = 4;
+const TURN_RATE = 2.6; // rad/s pivot turn at walk pace; scales with speed below
 const JUMP_SPEED = 9;
 const GRAVITY = -24;
-const TURN_SMOOTH = 10;
 
 export class Player {
-  constructor(noise2D, spawn = new THREE.Vector3(0, 0, 0)) {
-    this.noise2D = noise2D;
+  constructor(terrainMesh, spawn = new THREE.Vector3(0, 0, 0)) {
+    this.terrainMesh = terrainMesh;
 
     // group = ground position + facing (physics). robot.root hangs off it so
     // gait bob/lean never fights the ground-contact math below.
@@ -20,51 +21,96 @@ export class Player {
     this.group.add(this.robot.root);
     this.animator = new RobotAnimator(this.robot);
 
-    this.velocityY = 0;
+    // We're standing on a sphere, not a flat plane, so there's no single
+    // world "up" — instead we track our own local frame: `up` is the
+    // direction from the planet's center through us (surface normal), and
+    // `forward` is the tangent direction we're facing. Walking forward
+    // rolls this frame along a great circle, which is exactly how you'd
+    // walk around a small moon and loop back to your starting point.
+    const { dir } = placeOnSphere(terrainMesh, spawn.x, spawn.z);
+    this.up = dir.clone();
+    this.forward = new THREE.Vector3(0, 0, 1).sub(this.up.clone().multiplyScalar(this.up.z)).normalize();
+    if (!Number.isFinite(this.forward.x)) this.forward.set(0, 0, 1);
+
+    this.velocityRadial = 0;
     this.grounded = true;
-    this.facing = 0; // yaw in radians
     this.elapsed = 0;
 
-    const y = heightAt(noise2D, spawn.x, spawn.z);
-    this.group.position.set(spawn.x, y, spawn.z);
+    this.radialDistance = groundRadiusAt(terrainMesh, this.up);
+    this.group.position.copy(PLANET_CENTER).addScaledVector(this.up, this.radialDistance);
+    this._applyOrientation();
   }
 
-  update(dt, input, cameraYaw) {
+  _applyOrientation() {
+    const right = new THREE.Vector3().crossVectors(this.up, this.forward).normalize();
+    const basis = new THREE.Matrix4().makeBasis(right, this.up, this.forward);
+    this.group.quaternion.setFromRotationMatrix(basis);
+  }
+
+  update(dt, input) {
     this.elapsed += dt;
 
-    const moveX = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-    const moveZ = (input.back ? 1 : 0) - (input.forward ? 1 : 0);
-    const moving = moveX !== 0 || moveZ !== 0;
-    const running = moving && input.run;
-    const speed = running ? RUN_SPEED : WALK_SPEED;
+    // Tank controls: W/S drive forward/back along the robot's own facing;
+    // A/D pivot-turn it by spinning the tracks against each other (handled
+    // visually in the animator as left/right tread differential), not a
+    // camera-relative strafe — so turning no longer depends on camera yaw.
+    const forwardInput = (input.forward ? 1 : 0) - (input.back ? 1 : 0);
+    const turnInput = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+    const moving = forwardInput !== 0 || turnInput !== 0;
+    const sneaking = input.sneak;
+    const running = moving && input.run && !sneaking;
 
-    if (moving) {
-      const moveAngle = Math.atan2(moveX, moveZ) + cameraYaw;
-      let diff = moveAngle - this.facing;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      this.facing += diff * Math.min(1, TURN_SMOOTH * dt);
+    const speed = sneaking ? SNEAK_SPEED : running ? RUN_SPEED : WALK_SPEED;
+    const turnRate = TURN_RATE * (speed / WALK_SPEED);
 
-      this.group.position.x += Math.sin(moveAngle) * speed * dt;
-      this.group.position.z += Math.cos(moveAngle) * speed * dt;
-      this.group.rotation.y = this.facing;
+    // Pivot-turn: spin `forward` around our local vertical axis.
+    if (turnInput !== 0) {
+      const turnQ = new THREE.Quaternion().setFromAxisAngle(this.up, turnInput * turnRate * dt);
+      this.forward.applyQuaternion(turnQ).normalize();
     }
 
-    this.animator.update(dt, this.elapsed, { moving, running, moveZ });
+    // Walk/run: roll the (up, forward) frame along the great circle they
+    // define, around the axis perpendicular to both — this is what moves
+    // us across the planet's curved surface instead of a flat plane.
+    if (forwardInput !== 0) {
+      const rollAxis = new THREE.Vector3().crossVectors(this.up, this.forward).normalize();
+      const arcAngle = (forwardInput * speed * dt) / PLANET_RADIUS;
+      const rollQ = new THREE.Quaternion().setFromAxisAngle(rollAxis, arcAngle);
+      this.up.applyQuaternion(rollQ).normalize();
+      this.forward.applyQuaternion(rollQ).normalize();
+    }
 
-    const groundY = heightAt(this.noise2D, this.group.position.x, this.group.position.z);
+    // Guard against floating-point drift so up/forward stay exactly perpendicular.
+    this.forward.addScaledVector(this.up, -this.forward.dot(this.up)).normalize();
 
-    if (this.grounded && input.jump) {
-      this.velocityY = JUMP_SPEED;
+    const groundRadius = groundRadiusAt(this.terrainMesh, this.up);
+
+    const justJumped = this.grounded && input.jump;
+    if (justJumped) {
+      this.velocityRadial = JUMP_SPEED;
       this.grounded = false;
     }
 
-    this.velocityY += GRAVITY * dt;
-    this.group.position.y += this.velocityY * dt;
+    this.velocityRadial += GRAVITY * dt;
+    this.radialDistance += this.velocityRadial * dt;
 
-    if (this.group.position.y <= groundY) {
-      this.group.position.y = groundY;
-      this.velocityY = 0;
+    const wasAirborne = !this.grounded;
+    let justLanded = false;
+    if (this.radialDistance <= groundRadius) {
+      this.radialDistance = groundRadius;
+      this.velocityRadial = 0;
+      justLanded = wasAirborne;
       this.grounded = true;
+    } else {
+      this.grounded = false;
     }
+
+    this.group.position.copy(PLANET_CENTER).addScaledVector(this.up, this.radialDistance);
+    this._applyOrientation();
+
+    this.animator.update(dt, this.elapsed, {
+      forwardInput, turnInput, running, sneaking,
+      grounded: this.grounded, justJumped, justLanded,
+    });
   }
 }

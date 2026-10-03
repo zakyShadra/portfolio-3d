@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 // Renders text onto a canvas and returns a Three.js texture — used for
-// billboard labels and signpost arrows instead of loading a font/geometry lib.
+// billboard labels and holographic beam tags instead of loading a font/geometry lib.
 export function makeTextTexture(lines, { width = 512, height = 160, bg = 'rgba(10,12,8,0.78)', fg = '#f4f1e6', accent = '#ffd27a' } = {}) {
   const canvas = document.createElement('canvas');
   canvas.width = width;

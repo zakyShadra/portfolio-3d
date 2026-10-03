@@ -3,9 +3,9 @@ import { createNoise2D } from './noise.js';
 import { createTerrain } from './terrain.js';
 import { scatterWorld } from './scatter.js';
 import { Player } from './player.js';
-import { createSky, createClouds, animateClouds } from './sky.js';
+import { createSky } from './sky.js';
 import { buildLandmarks, animateLandmarks } from './landmarks.js';
-import { buildSignpost } from './signpost.js';
+import { buildSpaceship, animateSpaceship } from './spaceship.js';
 import { createInfoPanel } from './infoPanel.js';
 
 const canvas = document.getElementById('app');
@@ -16,7 +16,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#bcd9e0', 60, 320);
+scene.fog = new THREE.Fog('#05060f', 40, 240);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -25,20 +25,18 @@ const noise2D = createNoise2D(1337);
 const terrain = createTerrain(noise2D);
 scene.add(terrain);
 
-const landmarks = buildLandmarks(scene, noise2D);
-buildSignpost(scene, noise2D, landmarks);
+const landmarks = buildLandmarks(scene, terrain);
+const ship = buildSpaceship(scene, terrain, landmarks);
 const infoPanel = createInfoPanel();
 
-scatterWorld(scene, noise2D, {
+scatterWorld(scene, terrain, {
   avoidPoints: [{ x: 0, z: 0 }, ...landmarks.map((lm) => ({ x: lm.position.x, z: lm.position.z }))],
   avoidPointRadius: 10,
 });
 scene.add(createSky());
-const clouds = createClouds();
-scene.add(clouds);
 
 // --- Lights, with a slow day cycle so the scene never looks static ---
-const ambient = new THREE.HemisphereLight('#bcd9e0', '#4a6b3a', 0.6);
+const ambient = new THREE.HemisphereLight('#2a3550', '#55504a', 0.5);
 scene.add(ambient);
 
 const sun = new THREE.DirectionalLight('#fff3d6', 1.4);
@@ -53,7 +51,7 @@ scene.add(sun);
 scene.add(sun.target);
 
 // --- Player ---
-const player = new Player(noise2D, new THREE.Vector3(0, 0, 0));
+const player = new Player(terrain, new THREE.Vector3(0, 0, 0));
 scene.add(player.group);
 
 // --- Camera rig: drag-to-look third person orbit ---
@@ -79,19 +77,24 @@ canvas.addEventListener('wheel', (e) => {
 });
 
 // --- Keyboard input ---
-const input = { forward: false, back: false, left: false, right: false, run: false, jump: false };
+const input = { forward: false, back: false, left: false, right: false, run: false, jump: false, sneak: false };
 const keyMap = {
   KeyW: 'forward', ArrowUp: 'forward',
   KeyS: 'back', ArrowDown: 'back',
-  KeyA: 'left', ArrowLeft: 'left',
-  KeyD: 'right', ArrowRight: 'right',
+  KeyA: 'left', ArrowLeft: 'left', // pivot-turn left (left track back, right track forward)
+  KeyD: 'right', ArrowRight: 'right', // pivot-turn right
   ShiftLeft: 'run', ShiftRight: 'run',
   Space: 'jump',
+  ControlLeft: 'sneak', ControlRight: 'sneak',
 };
 window.addEventListener('keydown', (e) => {
   const key = keyMap[e.code];
-  if (key) input[key] = true;
-  if (e.code === 'Space') e.preventDefault();
+  if (key) {
+    input[key] = true;
+    // Sneak lives on Ctrl, so Ctrl+W/S/A would otherwise trigger the
+    // browser's close-tab/save-page/select-all shortcuts while sneaking.
+    e.preventDefault();
+  }
 });
 window.addEventListener('keyup', (e) => {
   const key = keyMap[e.code];
@@ -152,18 +155,27 @@ function render() {
   const dt = Math.min(timer.getDelta(), 0.05);
   const elapsed = timer.getElapsed();
 
-  player.update(dt, input, cameraState.yaw);
+  player.update(dt, input);
   animateLandmarks(landmarks, elapsed);
+  animateSpaceship(ship, elapsed);
   updateNearestLandmark();
 
-  // Smoothly follow the player with the orbit camera.
-  const target = player.group.position.clone().add(new THREE.Vector3(0, 1.4, 0));
-  const offset = new THREE.Vector3(
-    Math.sin(cameraState.yaw) * Math.cos(cameraState.pitch),
-    Math.sin(cameraState.pitch),
-    Math.cos(cameraState.yaw) * Math.cos(cameraState.pitch),
-  ).multiplyScalar(cameraState.distance);
+  // Smoothly follow the player with the orbit camera. There's no single
+  // world "up" on a sphere, so the orbit basis is built from the player's
+  // own local up (surface normal) each frame instead of a fixed Y axis.
+  const localUp = player.up;
+  const referenceHelper = Math.abs(localUp.y) > 0.95 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const tangentX = new THREE.Vector3().crossVectors(referenceHelper, localUp).normalize();
+  const tangentZ = new THREE.Vector3().crossVectors(localUp, tangentX).normalize();
+
+  const target = player.group.position.clone().addScaledVector(localUp, 1.4);
+  const offset = new THREE.Vector3()
+    .addScaledVector(tangentX, Math.sin(cameraState.yaw) * Math.cos(cameraState.pitch))
+    .addScaledVector(tangentZ, Math.cos(cameraState.yaw) * Math.cos(cameraState.pitch))
+    .addScaledVector(localUp, Math.sin(cameraState.pitch))
+    .multiplyScalar(cameraState.distance);
   const desiredPos = target.clone().add(offset);
+  camera.up.copy(localUp);
   camera.position.lerp(desiredPos, 1 - Math.pow(0.001, dt));
   camera.lookAt(target);
 
@@ -176,8 +188,6 @@ function render() {
   sun.intensity = THREE.MathUtils.clamp(0.3 + elevation * 1.2, 0.15, 1.6);
   const warmth = THREE.MathUtils.clamp(1 - elevation, 0, 1);
   sun.color.setRGB(1, 1 - warmth * 0.35, 1 - warmth * 0.6);
-
-  animateClouds(clouds, dt);
 
   renderer.render(scene, camera);
   requestAnimationFrame(render);

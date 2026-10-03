@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { heightAt } from './terrain.js';
+import { placeOnSphere } from './terrain.js';
 import { ALL_POINTS } from './content.js';
 import { makeTextTexture } from './textLabel.js';
 
@@ -49,7 +49,7 @@ function makeCrystal(color) {
   return group;
 }
 
-export function buildLandmarks(scene, noise2D) {
+export function buildLandmarks(scene, terrainMesh) {
   const landmarks = [];
   const count = ALL_POINTS.length;
 
@@ -57,11 +57,12 @@ export function buildLandmarks(scene, noise2D) {
     const angle = (i / count) * Math.PI * 2;
     const x = Math.cos(angle) * RING_RADIUS;
     const z = Math.sin(angle) * RING_RADIUS;
-    const y = heightAt(noise2D, x, z);
+    const { position, dir } = placeOnSphere(terrainMesh, x, z);
 
     const color = KIND_COLOR[data.kind] ?? '#ffffff';
     const crystal = makeCrystal(color);
-    crystal.position.set(x, y, z);
+    crystal.position.copy(position);
+    crystal.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     scene.add(crystal);
 
     const labelTexture = makeTextTexture([
@@ -70,12 +71,12 @@ export function buildLandmarks(scene, noise2D) {
     ]);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, depthWrite: false }));
     label.scale.set(7, 2.2, 1);
-    label.position.set(x, y + 6.2, z);
+    label.position.copy(position).addScaledVector(dir, 6.2);
     scene.add(label);
 
     landmarks.push({
       data,
-      position: new THREE.Vector3(x, y, z),
+      position: position.clone(),
       angle,
       object: crystal,
       label,
