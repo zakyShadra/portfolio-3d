@@ -8,27 +8,84 @@ const KIND_COLOR = {
   project: '#ff8a5c',
 };
 
+const SHIP_SCALE = 2; // overall size multiplier — big enough to walk into
+
 const LEG_COUNT = 4;
 const HULL_HEIGHT = 5.2;
-const HULL_BASE_Y = 1.6; // leg height the hull sits on top of
+const HULL_BASE_Y = 0.3; // hull rests low on short legs, close to the ground
+const BOTTOM_RADIUS = 2.6;
+const TOP_RADIUS = 1.5;
+
+// The doorway is a real gap cut into the hull geometry (not a panel glued on
+// top of it), so it reads as part of the hull and the player can actually
+// walk through it into the lit interior.
+const DOOR_HEIGHT_FRAC = 0.45; // fraction of HULL_HEIGHT that's door-height
+const DOOR_ANGULAR_WIDTH = 1.0; // radians
+// Standard math convention (x = r·cosφ, z = r·sinφ) — same as legs/colliders
+// below. Faces -Z, same side the beams/landmarks read from.
+const DOOR_FACING_ANGLE = -Math.PI / 2;
+// CylinderGeometry's thetaStart uses its OWN convention (x = r·sinθ, z =
+// r·cosθ — verified empirically, it's a quarter-turn off from the standard
+// one above), so the door's cut has to be placed in theta-space instead.
+const DOOR_THETA = Math.PI / 2 - DOOR_FACING_ANGLE;
+
+function hullRadiusAt(t) {
+  return THREE.MathUtils.lerp(BOTTOM_RADIUS, TOP_RADIUS, t);
+}
 
 function makeHull() {
   const group = new THREE.Group();
-  const hullMat = new THREE.MeshStandardMaterial({ color: '#d9d6cc', roughness: 0.45, metalness: 0.6 });
+  // DoubleSide so the inside of the door-section walls is visible too —
+  // standing inside (or looking in through the gap) would otherwise show
+  // nothing, since a mesh's back faces are culled by default.
+  const hullMat = new THREE.MeshStandardMaterial({ color: '#d9d6cc', roughness: 0.45, metalness: 0.6, side: THREE.DoubleSide });
   const trimMat = new THREE.MeshStandardMaterial({ color: '#2b2d33', roughness: 0.6, metalness: 0.4 });
   const glassMat = new THREE.MeshStandardMaterial({ color: '#8adfff', emissive: '#8adfff', emissiveIntensity: 0.9, roughness: 0.2, metalness: 0.1 });
 
-  // Tapered capsule body, narrower at the top.
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.6, HULL_HEIGHT, 16), hullMat);
-  body.position.y = HULL_BASE_Y + HULL_HEIGHT / 2;
-  body.castShadow = true;
-  body.receiveShadow = true;
-  group.add(body);
+  const doorSectionHeight = HULL_HEIGHT * DOOR_HEIGHT_FRAC;
+  const seamY = HULL_BASE_Y + doorSectionHeight;
+  const seamRadius = hullRadiusAt(DOOR_HEIGHT_FRAC);
 
-  // Panel-seam rings around the hull.
-  [0.28, 0.58, 0.85].forEach((t) => {
+  // Lower section: a tapered ring with a wedge missing — the doorway.
+  const doorThetaStart = DOOR_THETA + DOOR_ANGULAR_WIDTH / 2;
+  const doorThetaLength = Math.PI * 2 - DOOR_ANGULAR_WIDTH;
+  const lowerBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(seamRadius, BOTTOM_RADIUS, doorSectionHeight, 16, 1, true, doorThetaStart, doorThetaLength),
+    hullMat,
+  );
+  lowerBody.position.y = HULL_BASE_Y + doorSectionHeight / 2;
+  lowerBody.castShadow = true;
+  lowerBody.receiveShadow = true;
+  group.add(lowerBody);
+
+  // Upper section: the rest of the taper, solid all the way round.
+  const upperHeight = HULL_HEIGHT - doorSectionHeight;
+  const upperBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(TOP_RADIUS, seamRadius, upperHeight, 16, 1, true),
+    hullMat,
+  );
+  upperBody.position.y = seamY + upperHeight / 2;
+  upperBody.castShadow = true;
+  upperBody.receiveShadow = true;
+  group.add(upperBody);
+
+  // Interior floor, just inside the doorway.
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(BOTTOM_RADIUS - 0.15, 16), trimMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = HULL_BASE_Y + 0.02;
+  floor.receiveShadow = true;
+  group.add(floor);
+
+  // Warm interior light so the inside reads as a lit room through the doorway.
+  const interiorLight = new THREE.PointLight('#ffd27a', 4.5, 12);
+  interiorLight.position.set(0, HULL_BASE_Y + 1.6, -0.3);
+  group.add(interiorLight);
+
+  // Panel-seam rings, all up in the solid upper section so none of them
+  // float across the open doorway.
+  [0.55, 0.72, 0.9].forEach((t) => {
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(THREE.MathUtils.lerp(2.5, 1.6, t) + 0.03, 0.06, 6, 20),
+      new THREE.TorusGeometry(hullRadiusAt(t) + 0.03, 0.06, 6, 20),
       trimMat,
     );
     ring.rotation.x = Math.PI / 2;
@@ -37,12 +94,12 @@ function makeHull() {
   });
 
   // Rounded nose cap.
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(1.5, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), hullMat);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(TOP_RADIUS, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), hullMat);
   nose.position.y = HULL_BASE_Y + HULL_HEIGHT;
   nose.castShadow = true;
   group.add(nose);
 
-  // Cockpit porthole.
+  // Cockpit porthole — opposite side from the door, up in the solid section.
   const port = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), glassMat);
   port.position.set(0, HULL_BASE_Y + HULL_HEIGHT * 0.72, 1.55);
   group.add(port);
@@ -67,27 +124,8 @@ function makeHull() {
   group.userData.beaconLight = beaconLight;
   group.userData.beaconTop = beaconBulb.position.clone();
 
-  // Open hatch + ramp, the way into the ship (and the world).
-  const hatchMat = new THREE.MeshStandardMaterial({ color: '#15161a', roughness: 0.4, metalness: 0.3 });
-  const hatch = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.1, 0.15), hatchMat);
-  hatch.position.set(0, HULL_BASE_Y + 1.3, -2.55);
-  group.add(hatch);
-
-  const glowMat = new THREE.MeshBasicMaterial({ color: '#ffd27a', transparent: true, opacity: 0.85 });
-  const interiorGlow = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.8), glowMat);
-  // Sits just outside the hatch face so it reads as light spilling out, not buried inside the door mesh.
-  interiorGlow.position.set(0, HULL_BASE_Y + 1.3, -2.63);
-  interiorGlow.rotation.y = Math.PI;
-  group.add(interiorGlow);
-
-  const ramp = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.12, 3.2), trimMat);
-  ramp.position.set(0, HULL_BASE_Y * 0.42, -4.1);
-  ramp.rotation.x = -0.42;
-  ramp.castShadow = true;
-  ramp.receiveShadow = true;
-  group.add(ramp);
-
-  // Landing legs: angled struts with footpads, evenly spaced around the hull.
+  // Landing legs: short angled struts with footpads — the hull now rests
+  // low to the ground so the doorway lines up with actual walking height.
   const legMat = new THREE.MeshStandardMaterial({ color: '#4a4c52', roughness: 0.7, metalness: 0.5 });
   for (let i = 0; i < LEG_COUNT; i += 1) {
     const angle = (i / LEG_COUNT) * Math.PI * 2 + Math.PI / 4;
@@ -133,6 +171,7 @@ function makeHull() {
   scorch.position.y = 0.015;
   group.add(scorch);
 
+  group.scale.setScalar(SHIP_SCALE);
   return group;
 }
 
@@ -142,6 +181,37 @@ function makeBeam(color) {
   const pulseMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
   const pulse = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), pulseMat);
   return { beam, pulse, material };
+}
+
+function angularDistance(a, b) {
+  const diff = Math.abs(a - b) % (Math.PI * 2);
+  return diff > Math.PI ? Math.PI * 2 - diff : diff;
+}
+
+// A ring of overlapping circular colliders around the hull's widest point,
+// skipping a wider wedge than the visual doorway so there's no invisible
+// wall right at the opening — this is what makes the hull solid like the
+// scattered rocks while still letting the player walk in through the door.
+// Each point goes through placeOnSphere (the same call rocks/landmarks use)
+// rather than a flat offset from the hub's own height — the ground a few
+// units out from the hub can sit higher or lower than the hub itself, and a
+// collider floating above (or sunk below) where the player's feet actually
+// are never registers as a hit, letting them walk straight through.
+function buildHullColliders(terrainMesh) {
+  const wallRadius = BOTTOM_RADIUS * SHIP_SCALE;
+  const segments = 16;
+  const colliderRadius = 1.3;
+  const gapHalfWidth = DOOR_ANGULAR_WIDTH / 2 + 0.15;
+  const colliders = [];
+
+  for (let i = 0; i < segments; i += 1) {
+    const angle = (i / segments) * Math.PI * 2;
+    if (angularDistance(angle, DOOR_FACING_ANGLE) < gapHalfWidth) continue;
+
+    const { position } = placeOnSphere(terrainMesh, Math.cos(angle) * wallRadius, Math.sin(angle) * wallRadius);
+    colliders.push({ position, radius: colliderRadius });
+  }
+  return colliders;
 }
 
 // A landed capsule lander at the world's center, with holographic beams
@@ -157,7 +227,7 @@ export function buildSpaceship(scene, terrainMesh, landmarks) {
   const hull = makeHull();
   group.add(hull);
 
-  const beamOrigin = hubPosition.clone().addScaledVector(hubUp, HULL_BASE_Y + HULL_HEIGHT * 0.5);
+  const beamOrigin = hubPosition.clone().addScaledVector(hubUp, (HULL_BASE_Y + HULL_HEIGHT * 0.5) * SHIP_SCALE);
 
   const beams = landmarks.map((lm) => {
     const landmarkUp = lm.position.clone().sub(PLANET_CENTER).normalize();
@@ -187,7 +257,9 @@ export function buildSpaceship(scene, terrainMesh, landmarks) {
     return { material, pulse, origin: beamOrigin, target, phase: Math.random() * Math.PI * 2 };
   });
 
-  return { group, hull, beams };
+  const colliders = buildHullColliders(terrainMesh);
+
+  return { group, hull, beams, colliders };
 }
 
 export function animateSpaceship(ship, elapsed) {

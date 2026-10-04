@@ -55,7 +55,7 @@ const sunVisual = createSun();
 scene.add(sunVisual);
 
 // --- Player ---
-const player = new Player(terrain, new THREE.Vector3(0, 0, 0), rocks);
+const player = new Player(terrain, new THREE.Vector3(0, 0, 0), [...rocks, ...ship.colliders]);
 scene.add(player.group);
 
 // --- Camera rig: drag-to-look third person orbit, pinch-to-zoom on touch ---
