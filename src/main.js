@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { createNoise2D } from './noise.js';
-import { createTerrain } from './terrain.js';
+import { createTerrain, PLANET_CENTER, groundRadiusAt } from './terrain.js';
 import { scatterWorld } from './scatter.js';
 import { Player } from './player.js';
 import { createSky } from './sky.js';
 import { buildLandmarks, animateLandmarks } from './landmarks.js';
 import { buildSpaceship, animateSpaceship } from './spaceship.js';
 import { createInfoPanel } from './infoPanel.js';
+import { createSun, updateSun } from './sun.js';
 
 const canvas = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -49,6 +50,9 @@ sun.shadow.camera.bottom = -80;
 sun.shadow.camera.far = 300;
 scene.add(sun);
 scene.add(sun.target);
+
+const sunVisual = createSun();
+scene.add(sunVisual);
 
 // --- Player ---
 const player = new Player(terrain, new THREE.Vector3(0, 0, 0), rocks);
@@ -94,7 +98,11 @@ window.addEventListener('pointermove', (e) => {
   const dy = e.clientY - lastPointer.y;
   lastPointer = { x: e.clientX, y: e.clientY };
   cameraState.yaw -= dx * 0.005;
-  cameraState.pitch = THREE.MathUtils.clamp(cameraState.pitch - dy * 0.005, 0.1, 1.2);
+  // Wide open on purpose, almost full vertical — tilting past the player
+  // to look straight up at the sky (or down near the ground) is fine now
+  // that the camera itself can't dip below the terrain (see the ground
+  // clamp in the render loop below).
+  cameraState.pitch = THREE.MathUtils.clamp(cameraState.pitch - dy * 0.005, -1.45, 1.45);
 });
 function releaseCanvasPointer(e) {
   activeCanvasPointers.delete(e.pointerId);
@@ -153,53 +161,11 @@ updateTouchMode();
 touchModeQuery.addEventListener('change', updateTouchMode);
 
 const touchControls = document.getElementById('touch-controls');
-const joystickBase = document.getElementById('joystick-base');
-const joystickKnob = document.getElementById('joystick-knob');
-const JOY_RADIUS = 60;
-const JOY_DEADZONE = 0.35;
-let joystickPointerId = null;
 
-function setJoystickFromCenter(dx, dy) {
-  const dist = Math.hypot(dx, dy) || 1;
-  const clamped = Math.min(dist, JOY_RADIUS);
-  const kx = (dx / dist) * clamped;
-  const ky = (dy / dist) * clamped;
-  joystickKnob.style.transform = `translate(${kx}px, ${ky}px)`;
-
-  const nx = kx / JOY_RADIUS;
-  const ny = ky / JOY_RADIUS;
-  input.forward = ny < -JOY_DEADZONE;
-  input.back = ny > JOY_DEADZONE;
-  input.left = nx < -JOY_DEADZONE;
-  input.right = nx > JOY_DEADZONE;
-}
-function resetJoystick() {
-  joystickKnob.style.transform = 'translate(0px, 0px)';
-  input.forward = false;
-  input.back = false;
-  input.left = false;
-  input.right = false;
-}
-joystickBase.addEventListener('pointerdown', (e) => {
-  joystickPointerId = e.pointerId;
-  try { joystickBase.setPointerCapture(e.pointerId); } catch { /* ignore: capture is a nicety, not required */ }
-  const rect = joystickBase.getBoundingClientRect();
-  setJoystickFromCenter(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
-});
-joystickBase.addEventListener('pointermove', (e) => {
-  if (e.pointerId !== joystickPointerId) return;
-  const rect = joystickBase.getBoundingClientRect();
-  setJoystickFromCenter(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
-});
-function releaseJoystick(e) {
-  if (e.pointerId !== joystickPointerId) return;
-  joystickPointerId = null;
-  resetJoystick();
-}
-joystickBase.addEventListener('pointerup', releaseJoystick);
-joystickBase.addEventListener('pointercancel', releaseJoystick);
-
-// Hold-to-run / hold-to-jump buttons, mirroring the keyboard's hold semantics.
+// Hold-to-press buttons for movement, run, and jump — mirrors the keyboard's
+// hold semantics exactly (same four directions as W/S/A/D, including that
+// left/right pivot-turn rather than strafe). A D-pad reads more predictably
+// on screen than a joystick for tank controls like these.
 // Pointer capture keeps the press "latched" to the button even if the finger
 // drifts a few pixels, which touch input does constantly.
 function bindHoldButton(el, key) {
@@ -215,6 +181,10 @@ function bindHoldButton(el, key) {
   el.addEventListener('pointerup', release);
   el.addEventListener('pointercancel', release);
 }
+bindHoldButton(document.getElementById('dpad-up'), 'forward');
+bindHoldButton(document.getElementById('dpad-down'), 'back');
+bindHoldButton(document.getElementById('dpad-left'), 'left');
+bindHoldButton(document.getElementById('dpad-right'), 'right');
 bindHoldButton(document.getElementById('run-btn'), 'run');
 bindHoldButton(document.getElementById('jump-btn'), 'jump');
 
@@ -296,6 +266,17 @@ function render() {
   const desiredPos = target.clone().add(offset);
   camera.up.copy(localUp);
   camera.position.lerp(desiredPos, 1 - Math.pow(0.001, dt));
+
+  // Now that pitch can swing low enough to look up past the player, clamp
+  // the camera's own height to the curved ground beneath it (same ground
+  // query the player's feet use) so it can never dip below the terrain
+  // and show the empty void underneath the map.
+  const camDir = camera.position.clone().sub(PLANET_CENTER).normalize();
+  const camFloorRadius = groundRadiusAt(terrain, camDir) + 1.2;
+  if (camera.position.distanceTo(PLANET_CENTER) < camFloorRadius) {
+    camera.position.copy(PLANET_CENTER).addScaledVector(camDir, camFloorRadius);
+  }
+
   camera.lookAt(target);
 
   // Slow day-night cycle: sun arcs across the sky, light warms/cools.
@@ -307,6 +288,7 @@ function render() {
   sun.intensity = THREE.MathUtils.clamp(0.3 + elevation * 1.2, 0.15, 1.6);
   const warmth = THREE.MathUtils.clamp(1 - elevation, 0, 1);
   sun.color.setRGB(1, 1 - warmth * 0.35, 1 - warmth * 0.6);
+  updateSun(sunVisual, sun, player.group.position);
 
   renderer.render(scene, camera);
   requestAnimationFrame(render);
