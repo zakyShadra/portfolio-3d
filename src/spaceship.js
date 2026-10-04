@@ -12,7 +12,12 @@ const SHIP_SCALE = 2; // overall size multiplier — big enough to walk into
 
 const LEG_COUNT = 4;
 const HULL_HEIGHT = 5.2;
-const HULL_BASE_Y = 0.3; // hull rests low on short legs, close to the ground
+// The player's height always comes from raycasting the terrain mesh, never
+// from standing on a ship mesh — so the interior floor has to sit flush at
+// 0 (actual ground level) or the player's feet end up below/through it,
+// which is exactly the "dasar tembus" bug: the floor used to float ~0.6
+// world units above where the player's feet really are.
+const HULL_BASE_Y = 0;
 const BOTTOM_RADIUS = 2.6;
 const TOP_RADIUS = 1.5;
 
